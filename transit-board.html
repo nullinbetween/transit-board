@@ -1,0 +1,593 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Departures">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23000'/%3E%3Ctext x='32' y='46' font-size='38' font-family='-apple-system,sans-serif' font-weight='700' fill='%23fff' text-anchor='middle'%3E%E2%86%92%3C/text%3E%3C/svg%3E">
+<title>Departures (demo)</title>
+<style>
+/* Light only. All accent colours below clear 5:1 contrast on white. */
+:root{
+  --bg:#fff; --surface:#f4f4f6; --line:#e4e4e9;
+  --ink:#000; --dim:#5f5f66; --faint:#78787d;
+  --go:#d70015;      /* leave now      5.4:1 on white */
+  --warn:#b45309;    /* soon           5.1:1 on white */
+  --calm:#1d7a37;
+  --accent:#0040dd;  /* badges         7.5:1 on white */
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","Hiragino Sans","Noto Sans CJK JP",sans-serif;
+  font-feature-settings:"tnum" 1;
+  padding:max(10px,env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
+  -webkit-font-smoothing:antialiased;line-height:1.35}
+.page{max-width:640px;margin:0 auto}
+@media (min-width:1000px){.page{max-width:1080px;display:grid;grid-template-columns:1fr 1fr;gap:0 40px;align-items:start}
+  .page>.full{grid-column:1/-1}}
+
+.hdr{padding:6px 0 16px;border-bottom:1px solid var(--line);margin-bottom:2px}
+.hdr-a{display:flex;align-items:flex-start;gap:12px}
+#dateBig{font-size:23px;font-weight:700;letter-spacing:-.6px;line-height:1.12}
+#dateSub{font-size:12.5px;color:var(--dim);font-weight:500;margin-top:3px}
+#clock{margin-left:auto;font-size:23px;font-weight:600;letter-spacing:-.6px;
+  font-variant-numeric:tabular-nums;line-height:1.12}
+
+/* Demo / invalid-data banner. Shown whenever the data is not explicitly marked
+   is_demo:false, so a data file merely existing never switches it off. */
+.demobar{background:var(--go);color:#fff;border-radius:10px;padding:13px 15px;margin:0 0 4px;
+  font-size:15px;font-weight:700;line-height:1.45;letter-spacing:-.2px}
+.demobar small{display:block;font-weight:500;font-size:12.5px;opacity:.92;margin-top:4px}
+.demobar.err{background:var(--warn)}
+body.demo .num,body.demo .word{color:var(--faint) !important}
+body.demo .lane::after{content:"DEMO — fictional, not a real timetable";display:block;margin-top:6px;
+  font-size:10.5px;font-weight:700;letter-spacing:.5px;color:var(--go)}
+.lane{padding:14px 0;border-top:1px solid var(--line)}
+.lane:first-child{border-top:none}
+.lhead{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap}
+.lname{font-size:15px;font-weight:600;letter-spacing:-.2px;color:var(--dim)}
+.lname .dst{font-weight:700;color:var(--ink)}
+.lline{font-size:12px;color:var(--faint);font-weight:500}
+.badge{font-size:9.5px;font-weight:700;letter-spacing:.6px;padding:2px 7px;border-radius:4px;
+  background:rgba(0,64,221,.10);color:var(--accent);text-transform:uppercase}
+.badge.live{background:rgba(29,122,55,.11);color:var(--calm)}
+
+.big{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.num{font-size:clamp(44px,14vw,58px);font-weight:700;letter-spacing:-2.5px;line-height:.92;
+  font-variant-numeric:tabular-nums}
+.unit{font-size:15px;font-weight:600;color:var(--dim);letter-spacing:-.2px}
+.word{font-size:clamp(30px,10vw,40px);font-weight:700;letter-spacing:-1.5px;line-height:1}
+.sub{font-size:13px;color:var(--dim);margin-top:7px;font-weight:500;font-variant-numeric:tabular-nums}
+.sub .nx{color:var(--faint)}
+
+.lane[data-s="go"] .num,.lane[data-s="go"] .word{color:var(--go)}
+.lane[data-s="warn"] .num,.lane[data-s="warn"] .word{color:var(--warn)}
+.lane[data-s="calm"] .num{color:var(--ink)}
+a.extlink{display:flex;margin-bottom:8px;align-items:center;gap:10px;margin-top:14px;padding:14px 15px;
+  border:1px solid var(--line);border-radius:11px;text-decoration:none;background:var(--surface)}
+a.extlink .el-t{font-size:14.5px;font-weight:700;color:var(--ink);letter-spacing:-.2px}
+a.extlink > span:first-child{flex:1}
+a.extlink .el-a{color:var(--accent);font-size:17px;font-weight:700}
+.big.short .num{font-size:clamp(26px,8vw,34px);letter-spacing:-1.2px}
+.big.short .word{font-size:clamp(20px,6vw,26px);letter-spacing:-.6px}
+.big.short .unit{font-size:13px}
+.shorttag{font-size:11px;font-weight:700;color:var(--warn);border:1px solid var(--warn);
+  border-radius:4px;padding:1px 5px;margin-right:7px;white-space:nowrap}
+.hutag{font-size:11px;font-weight:700;color:var(--warn);border:1px dashed var(--warn);
+  border-radius:4px;padding:1px 5px;margin-right:7px;white-space:nowrap}
+.alltimes .t.sh{font-size:10px;padding:3px 5px;opacity:.75}
+.lane[data-s="none"]{opacity:.5}
+.lane[data-s="none"] .word{color:var(--faint);font-size:20px;letter-spacing:-.4px}
+
+details.fold{border-top:1px solid var(--line);padding:15px 0}
+details.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;
+  font-size:14px;font-weight:600;color:var(--dim)}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary .cv{margin-left:auto;font-size:11px;color:var(--faint);transition:transform .15s}
+details.fold[open]>summary .cv{transform:rotate(90deg)}
+details.fold[open]>summary{margin-bottom:4px}
+
+.alltimes{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px}
+.alltimes .t{font-size:12px;color:var(--dim);background:var(--surface);border-radius:5px;padding:4px 7px;
+  font-variant-numeric:tabular-nums}
+.alltimes .t.past{opacity:.35}
+.alltimes .lbl{flex:0 0 100%;font-size:11px;color:var(--faint);margin-bottom:2px;font-weight:500}
+summary.tapall{list-style:none;font-size:12px;color:var(--faint);font-weight:500;margin-top:9px;
+  cursor:pointer;display:inline-block}
+summary.tapall::-webkit-details-marker{display:none}
+summary.tapall::after{content:" \203A"}
+
+.plan{padding:15px 0;border-top:1px solid var(--line)}
+.plan h2{font-size:11px;font-weight:600;color:var(--faint);letter-spacing:.7px;text-transform:uppercase;margin-bottom:9px}
+.pitem{display:flex;gap:10px;align-items:baseline;padding:5px 0;font-size:14px}
+.pitem .k{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 7px;border-radius:4px;
+  background:var(--surface);color:var(--dim);text-transform:uppercase}
+.pitem .k.off{background:rgba(215,0,21,.09);color:var(--go)}
+.pitem .v{color:var(--ink);font-weight:500;min-width:0}
+.pitem .v small{display:block;color:var(--faint);font-size:11.5px;font-weight:400;margin-top:1px}
+
+.stamp{font-size:11.5px;color:var(--faint);padding:14px 0 0;border-top:1px solid var(--line);
+  margin-top:2px;font-weight:500;line-height:1.6}
+.stamp div+div{margin-top:4px}
+.stamp .warn{color:var(--warn)}
+.stamp .stale{color:var(--go)}
+.walkrow{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13.5px}
+.walkrow label{flex:1;color:var(--dim);font-weight:500}
+.walkrow label small{display:block;color:var(--faint);font-size:11px;font-weight:400;margin-top:1px}
+.walkrow input{width:64px;padding:7px 9px;border-radius:8px;border:1px solid var(--line);
+  background:var(--bg);color:var(--ink);font-size:15px;text-align:center;-webkit-appearance:none;
+  font-variant-numeric:tabular-nums;font-family:inherit}
+.hint{font-size:11.5px;color:var(--faint);margin-top:8px;line-height:1.6;font-weight:500}
+.hint b{color:var(--dim);font-weight:600}
+.errlist{font-size:13px;color:var(--warn);line-height:1.6;padding:14px 0}
+hr{border:none;border-top:1px solid var(--line);margin:16px 0}
+.lbl2{font-size:11px;color:var(--faint);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+</style></head><body class="demo">
+<div class="page">
+
+  <div class="full">
+    <div id="demobar"><div class="demobar">DEMO DATA — fictional stops and times.
+      <small>Do not use these times to travel.</small></div></div>
+    <header class="hdr">
+      <div class="hdr-a">
+        <div><div id="dateBig">&mdash;</div><div id="dateSub"></div></div>
+        <div id="clock">--:--</div>
+      </div>
+    </header>
+  </div>
+
+  <div id="board"></div>
+
+  <div>
+
+    <div class="plan"><h2>Today</h2><div id="special"></div></div>
+
+    <details class="fold">
+      <summary>Settings<span class="cv">&#8250;</span></summary>
+      <div style="margin-top:10px">
+        <div class="lbl2">Door to stop</div>
+        <div class="hint" style="margin:0 0 4px">Total minutes from leaving home to standing at the stop.
+          Saved only in this browser (localStorage).</div>
+        <div id="walks"></div>
+        <hr>
+        <div class="hint" id="dataInfo"></div>
+        <hr>
+        <div class="hint" id="attrib"></div>
+      </div>
+    </details>
+
+    <div id="links"></div>
+    <div class="stamp" id="stamp"></div>
+  </div>
+
+</div>
+
+<!-- Bundled fictional data (is_demo: true). -->
+<script src="demo-data.js"></script>
+<!-- Optional converters for your own data; they never fetch anything by themselves. -->
+<script src="adapters/simple-csv-adapter.js"></script>
+<script src="adapters/realtime-json-adapter.js"></script>
+<!-- Your own settings/data. Copy config.example.js to config.local.js (git-ignored).
+     When absent, the board shows the demo data only. -->
+<script src="config.local.js" onerror="void 0"></script>
+
+<script id="core-logic">
+/* ==========================================================================
+   Departures board — core logic (pure functions, no DOM).
+
+   Core idea: never show a timetable first. Show "leave in N min".
+              leave_time = departure_time - door_to_stop_time
+
+   Data contract: see DATA_FORMAT.md ("transit-board/v1").
+   Demo rule: data counts as real ONLY when it says is_demo:false and is not
+   the bundled demo dataset. A file being present does not make it real.
+   ========================================================================== */
+const TB_FORMAT='transit-board/v1';
+const DEMO_DATASET_IDS=['demo-fictional'];
+const SERVICE_KINDS=['wd','sa','su'];
+const WEEKDAY_IDX={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+const YMD_RE=/^(\d{4})-(\d{2})-(\d{2})$/;
+const ISO_WITH_OFFSET_RE=/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-](\d{2}):(\d{2}))$/;
+
+/* A date that exists on the calendar ("2027-99-99" and "2027-02-29" do not). */
+function isRealYmd(s){
+  const m=YMD_RE.exec(String(s==null?'':s));
+  if(!m) return false;
+  const y=+m[1], mo=+m[2], d=+m[3];
+  if(mo<1||mo>12||d<1) return false;
+  const leap=(y%4===0&&y%100!==0)||y%400===0;
+  return d<=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31][mo-1];
+}
+/* ISO 8601 with an explicit UTC offset, a real date, a real time and a real offset. */
+function isValidIsoWithOffset(s){
+  const m=ISO_WITH_OFFSET_RE.exec(String(s==null?'':s));
+  if(!m||!isRealYmd(m[1])) return false;
+  if(+m[2]>23||+m[3]>59||(m[4]!==undefined&&+m[4]>59)) return false;
+  if(m[5]!=='Z'&&(+m[6]>23||+m[7]>59)) return false;
+  return Number.isFinite(Date.parse(s));
+}
+const HHMM_RE=/^(\d{2}):([0-5]\d)$/;
+
+const pad2=n=>String(n).padStart(2,'0');
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function safeUrl(u){
+  try{const x=new URL(String(u));return (x.protocol==='https:'||x.protocol==='http:')?x.href:null;}
+  catch(e){return null;}
+}
+function deviceTimeZone(){
+  try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';}catch(e){return 'UTC';}
+}
+function isValidTimeZone(tz){
+  if(typeof tz!=='string'||!tz) return false;
+  try{new Intl.DateTimeFormat('en-US',{timeZone:tz});return true;}catch(e){return false;}
+}
+function dataTimeZone(data){
+  return data&&isValidTimeZone(data.timezone)?data.timezone:deviceTimeZone();
+}
+
+/* Wall-clock parts of an instant in a given IANA time zone. */
+function zonedParts(date,timeZone){
+  const f=new Intl.DateTimeFormat('en-US',{timeZone,hourCycle:'h23',year:'numeric',month:'2-digit',
+    day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',weekday:'short'});
+  const p={};
+  for(const x of f.formatToParts(date)) p[x.type]=x.value;
+  return {ymd:`${p.year}-${p.month}-${p.day}`, hh:(+p.hour)%24, mm:+p.minute, ss:+p.second,
+          dow:WEEKDAY_IDX[p.weekday]};
+}
+function addDaysYmd(ymd,n){
+  const[y,m,d]=ymd.split('-').map(Number);
+  return new Date(Date.UTC(y,m-1,d+n)).toISOString().slice(0,10);
+}
+function dowOfYmd(ymd){
+  const[y,m,d]=ymd.split('-').map(Number);
+  return new Date(Date.UTC(y,m-1,d)).getUTCDay();
+}
+
+/* Which timetable column a service day uses: wd / sa / su (holidays → holiday_service). */
+function serviceKind(ymd,calendar){
+  const cal=calendar||{}, hol=cal.holidays||{};
+  if(Object.prototype.hasOwnProperty.call(hol,ymd)) return SERVICE_KINDS.includes(cal.holiday_service)?cal.holiday_service:'su';
+  const w=dowOfYmd(ymd);
+  return w===0?'su':(w===6?'sa':'wd');
+}
+
+/* "HH:MM" inside a service day → minutes after that service day's midnight.
+   Hours below endHour belong to the night after (00:18 in Saturday's column is
+   Saturday-night service, i.e. Sunday 00:18). GTFS-style 24:00–47:59 also works. */
+function svcMinutes(t,endHour){
+  const m=HHMM_RE.exec(String(t||''));
+  if(!m) return null;
+  const h=+m[1], mi=+m[2];
+  if(h>47) return null;
+  return (h<endHour?h+24:h)*60+mi;
+}
+
+function isDemoData(data){
+  return !(data&&typeof data==='object'&&data.is_demo===false&&!DEMO_DATASET_IDS.includes(data.dataset_id));
+}
+
+const isStr=v=>typeof v==='string';
+const isPlainObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+function validateData(data){
+  const errors=[], warnings=[];
+  if(!isPlainObj(data)) return {ok:false,errors:['No data loaded (expected an object).'],warnings};
+  const optStr=(v,name)=>{ if(v!=null&&!isStr(v)) errors.push(`${name} must be a string.`); };
+  if(data.format!==TB_FORMAT) errors.push(`format must be "${TB_FORMAT}".`);
+  if(data.kind!=='static'&&data.kind!=='realtime') errors.push('kind must be "static" or "realtime".');
+  optStr(data.dataset_id,'dataset_id'); optStr(data.source,'source');
+  if(data.is_demo!=null&&typeof data.is_demo!=='boolean') warnings.push('is_demo is not true/false, so the data is treated as a demo.');
+  if(data.generated!=null&&!isRealYmd(data.generated)) errors.push('generated must be a real calendar date (YYYY-MM-DD).');
+  if(data.timezone!=null&&!isValidTimeZone(data.timezone)) errors.push('timezone is not a valid IANA time zone.');
+  if(data.timezone==null) warnings.push('No timezone in the data; using this device’s time zone.');
+  const endHour=data.service_day_end_hour==null?4:data.service_day_end_hour;
+  if(!(Number.isInteger(endHour)&&endHour>=0&&endHour<=12)) errors.push('service_day_end_hour must be an integer 0–12.');
+  if(data.kind==='static'&&!isRealYmd(data.valid_until)) errors.push('valid_until must be a real calendar date (YYYY-MM-DD) for static data.');
+  if(data.calendar!=null){
+    const c=data.calendar;
+    if(!isPlainObj(c)) errors.push('calendar must be an object.');
+    else{
+      if(c.holidays!=null){
+        if(!isPlainObj(c.holidays)) errors.push('calendar.holidays must be an object of "YYYY-MM-DD": "name".');
+        else for(const [k,v] of Object.entries(c.holidays)){
+          if(!isRealYmd(k)) errors.push(`calendar.holidays key "${k}" is not a real date (YYYY-MM-DD).`);
+          if(!isStr(v)) errors.push(`calendar.holidays["${k}"] must be a string.`);
+        }
+      }
+      if(c.holidays_until!=null&&!isRealYmd(c.holidays_until)) errors.push('calendar.holidays_until must be a real calendar date (YYYY-MM-DD).');
+      if(c.holiday_service!=null&&!SERVICE_KINDS.includes(c.holiday_service)) errors.push('calendar.holiday_service must be "wd", "sa" or "su".');
+    }
+  }
+  if(data.attribution!=null&&!(Array.isArray(data.attribution)&&data.attribution.every(isStr))) errors.push('attribution must be an array of strings.');
+  if(data.links!=null&&!Array.isArray(data.links)) errors.push('links must be an array.');
+  if(data.kind==='realtime'){
+    if(!isValidIsoWithOffset(data.fetched_at)) errors.push('fetched_at must be a real ISO 8601 time with a UTC offset, e.g. 2026-10-21T08:00:00+09:00.');
+    if(!(Number.isFinite(data.max_age_sec)&&data.max_age_sec>0)) errors.push('max_age_sec must be a positive number.');
+  }
+  if(!Array.isArray(data.stops)||!data.stops.length){ errors.push('stops must be a non-empty array.'); }
+  else data.stops.forEach((s,i)=>{
+    const at=`stops[${i}]`;
+    if(!isPlainObj(s)){errors.push(`${at} must be an object.`);return;}
+    if(!isStr(s.id)||!s.id) errors.push(`${at}.id is required (a string).`);
+    if(!isStr(s.label)||!s.label) errors.push(`${at}.label is required (a string).`);
+    optStr(s.sub,`${at}.sub`); optStr(s.vehicle,`${at}.vehicle`); optStr(s.target,`${at}.target`);
+    if(!(Number.isFinite(s.walk_min)&&s.walk_min>=0&&s.walk_min<=90)) errors.push(`${at}.walk_min must be a number 0–90.`);
+    if(!Array.isArray(s.lanes)){errors.push(`${at}.lanes must be an array.`);return;}
+    s.lanes.forEach((l,j)=>{
+      const al=`${at}.lanes[${j}]`;
+      if(!isPlainObj(l)){errors.push(`${al} must be an object.`);return;}
+      if(!isStr(l.id)||!l.id) errors.push(`${al}.id is required (a string).`);
+      optStr(l.line,`${al}.line`); optStr(l.to,`${al}.to`);
+      if(data.kind==='static'){
+        const sv=l.services;
+        if(!isPlainObj(sv)){errors.push(`${al}.services is required for static data (an object).`);return;}
+        for(const k of SERVICE_KINDS){
+          if(sv[k]==null) continue;
+          if(!Array.isArray(sv[k])){errors.push(`${al}.services.${k} must be an array.`);continue;}
+          sv[k].forEach((x,n)=>{
+            if(!isPlainObj(x)||!isStr(x.t)||svcMinutes(x.t,0)===null) errors.push(`${al}.services.${k}[${n}].t must be "HH:MM" (00:00–47:59).`);
+            else optStr(x.short_to,`${al}.services.${k}[${n}].short_to`);
+          });
+        }
+      }else if(data.kind==='realtime'){
+        if(!Array.isArray(l.predictions)){errors.push(`${al}.predictions is required for realtime data.`);return;}
+        l.predictions.forEach((x,n)=>{
+          if(!isPlainObj(x)||!isValidIsoWithOffset(x.at)) errors.push(`${al}.predictions[${n}].at must be a real ISO 8601 time with a UTC offset.`);
+          else optStr(x.short_to,`${al}.predictions[${n}].short_to`);
+        });
+      }
+    });
+  });
+  if(Array.isArray(data.links)) data.links.forEach((l,i)=>{ if(!isPlainObj(l)||!safeUrl(l.url)) warnings.push(`links[${i}] ignored: only http(s) URLs are shown.`); });
+  return {ok:!errors.length,errors,warnings};
+}
+
+/* Freshness checks. Returns [{level:'warn'|'stale', msg}]. */
+function dataStatus(data,now){
+  const out=[], tz=dataTimeZone(data), today=zonedParts(now,tz).ymd;
+  if(data.kind==='static'){
+    if(today>data.valid_until) out.push({level:'stale',msg:`Timetable expired on ${data.valid_until}. Times may be wrong.`});
+    const hu=data.calendar&&data.calendar.holidays_until;
+    if(!isRealYmd(hu)) out.push({level:'warn',msg:'No holiday list: public holidays are treated as normal days.'});
+    else if(today>hu) out.push({level:'stale',msg:`Holiday list only covers up to ${hu}; weekday / holiday detection is no longer reliable.`});
+  }else{
+    const ageSec=(now.getTime()-Date.parse(data.fetched_at))/1000;
+    if(ageSec>data.max_age_sec) out.push({level:'stale',msg:`Live data is ${Math.round(ageSec/60)} min old (limit ${Math.round(data.max_age_sec/60)} min). Estimates may be wrong.`});
+    if(ageSec<-120) out.push({level:'warn',msg:'Live data timestamp is in the future; check the device clock.'});
+  }
+  return out;
+}
+
+/* Static: departures as minutes relative to today's local midnight, from yesterday's
+   column (after-midnight runs) through the next SEARCH_DAYS service days. There is no
+   "no more today": a weekday-only route on a Saturday answers with Monday's first run,
+   and a long holiday stretch is searched past as well. */
+const SEARCH_DAYS=8;
+const DOW_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function staticCandidates(lane,todayYmd,data){
+  const endHour=data.service_day_end_hour==null?4:data.service_day_end_hour, out=[];
+  const hu=data.calendar&&data.calendar.holidays_until;
+  for(let off=-1;off<=SEARCH_DAYS;off++){
+    const day=addDaysYmd(todayYmd,off);
+    if(day>data.valid_until) break;             // never show runs from days the timetable does not cover
+    const kind=serviceKind(day,data.calendar);
+    const unchecked=isRealYmd(hu)&&day>hu;      // the holiday list does not reach this day: shown, but flagged
+    for(const x of ((lane.services||{})[kind]||[])){
+      const sm=svcMinutes(x.t,endHour);
+      if(sm===null) continue;
+      out.push({t:x.t.replace(/^(\d{2})/,h=>pad2((+h)%24)), m:off*1440+sm, short_to:x.short_to||null, holiday_unchecked:unchecked});
+    }
+  }
+  return out.sort((a,b)=>a.m-b.m);
+}
+function realtimeCandidates(lane,now,tz,nowM){
+  return (lane.predictions||[]).map(p=>{
+    const at=Date.parse(p.at);
+    if(!Number.isFinite(at)) return null;
+    const z=zonedParts(new Date(at),tz);
+    return {t:`${pad2(z.hh)}:${pad2(z.mm)}`, m:nowM+(at-now.getTime())/60000, short_to:p.short_to||null};
+  }).filter(Boolean).sort((a,b)=>a.m-b.m);
+}
+
+/* Upcoming departures you can still make, given walk minutes. */
+function upcoming(lane,data,now,walk){
+  const tz=dataTimeZone(data), z=zonedParts(now,tz), nowM=z.hh*60+z.mm+z.ss/60;
+  const all=data.kind==='realtime'?realtimeCandidates(lane,now,tz,nowM):staticCandidates(lane,z.ymd,data);
+  const list=all.filter(x=>x.m-walk>=nowM-0.5)
+    .map(x=>({...x, day:Math.floor(x.m/1440), leaveIn:Math.round(x.m-walk-nowM)}));
+  return {nowM,list,today:z.ymd};
+}
+/* "" for today, "tomorrow", then a short weekday name ("Mon") further ahead. */
+function dayLabel(todayYmd,day){
+  if(day<=0) return '';
+  return day===1?'tomorrow':DOW_SHORT[dowOfYmd(addDaysYmd(todayYmd,day))];
+}
+</script>
+
+<script>
+/* ============================ UI ============================ */
+const CFG=(typeof window.TRANSIT_CONFIG==='object'&&window.TRANSIT_CONFIG)||{};
+let DATA=(typeof window.TRANSIT_DATA==='object'&&window.TRANSIT_DATA)||null;
+let loadError=null;
+
+function store(){ try{return window.localStorage;}catch(e){return null;} }
+function walkOf(stop){
+  const ls=store(); const v=ls?ls.getItem('tb_walk_'+stop.id):null;
+  const n=v===null?NaN:Number(v);
+  return Number.isFinite(n)&&n>=0&&n<=90?n:stop.walk_min;
+}
+function setWalk(id,v){
+  const n=Number(v), ls=store();
+  if(ls&&Number.isFinite(n)&&n>=0&&n<=90) ls.setItem('tb_walk_'+id,String(n));
+  renderAll();
+}
+
+const KIND_LABEL={wd:'Weekday',sa:'Saturday',su:'Sun & holidays'};
+const SERVICE_WORD={wd:'Weekday service',sa:'Saturday service',su:'Sunday / holiday service'};
+
+function laneHTML(lane,stop,now){
+  const walk=walkOf(stop);
+  const live=DATA.kind==='realtime';
+  const head=`<div class="lhead">
+      <span class="lname">to <span class="dst">${esc(lane.to)}</span></span>
+      <span class="lline">${esc(lane.line)} &middot; ${esc(stop.label)}</span>
+      <span class="badge${live?' live':''}">${live?'Live estimate':'Scheduled'}</span></div>`;
+  const {nowM,list,today}=upcoming(lane,DATA,now,walk);
+  if(!list.length){
+    return `<div class="lane" data-s="none">${head}
+      <div class="big"><span class="word">No departures</span></div>
+      <div class="sub">${live?'No live predictions for this direction.':noStaticReason(now)}</div></div>`;
+  }
+  const d=list[0], nx=list[1], mins=d.leaveIn;
+  const state=mins<=2?'go':(mins<=7?'warn':'calm');
+  const shortCls=d.short_to?' short':'';
+  const body=mins<=0
+    ? `<div class="big${shortCls}"><span class="word">Leave now</span></div>`
+    : `<div class="big${shortCls}"><span class="num">${mins}</span><span class="unit">min until you leave</span></div>`;
+  const when=t=>{const l=dayLabel(today,t.day); return (l?l+' ':'')+t.t;};
+  const dest=d.short_to?`<span class="shorttag">only to ${esc(d.short_to)}</span>`:'';
+  // A run on a day past calendar.holidays_until: say so (once the list has run out for today too, the banner says it).
+  const hu=DATA.calendar&&DATA.calendar.holidays_until, huOpen=t=>t.holiday_unchecked&&today<=hu;
+  const huTag=huOpen(d)?`<span class="hutag" title="Holidays after ${esc(hu)} are not in the data; this run assumes that day is not a holiday.">holiday list ends ${esc(hu)}</span>`:'';
+  const V=esc(stop.vehicle||'bus'), T=esc(stop.target||'stop');
+  const sub=`<div class="sub">${V} ${live?'expected':'leaves'} ${when(d)} ${huTag}${dest}&middot; ${walk} min to the ${T}`
+    + (nx?`<span class="nx"> &middot; next ${V} ${when(nx)} (+${Math.round(nx.m-d.m)} min)`
+        +`${nx.short_to?` only to ${esc(nx.short_to)}`:''}${huOpen(nx)&&!huOpen(d)?` (holiday list ends ${esc(hu)})`:''}</span>`:'')+`</div>`;
+  return `<div class="lane" data-s="${state}" data-key="${esc(stop.id+'/'+lane.id)}">${head}${body}${sub}${live?'':allTimes(lane,walk,now,nowM)}</div>`;
+}
+function noStaticReason(now){
+  const today=zonedParts(now,dataTimeZone(DATA)).ymd;
+  if(today>DATA.valid_until) return `The timetable ended on ${esc(DATA.valid_until)}; no departures are shown from an expired timetable.`;
+  const last=addDaysYmd(today,SEARCH_DAYS);
+  return `No departures in this timetable up to ${esc(last<DATA.valid_until?last:DATA.valid_until)}.`;
+}
+function allTimes(lane,walk,now,nowM){
+  const z=zonedParts(now,dataTimeZone(DATA)), kind=serviceKind(z.ymd,DATA.calendar);
+  const endHour=DATA.service_day_end_hour==null?4:DATA.service_day_end_hour;
+  const svc=((lane.services||{})[kind]||[]).map(x=>({...x,m:svcMinutes(x.t,endHour)})).filter(x=>x.m!==null).sort((a,b)=>a.m-b.m);
+  const cells=svc.map(x=>{
+    const past=x.m-walk<nowM-0.5;
+    return `<span class="t${past?' past':''}${x.short_to?' sh':''}" ${x.short_to?`title="only to ${esc(x.short_to)}"`:''}>${esc(x.t)}</span>`;
+  }).join('');
+  const nShort=svc.filter(x=>x.short_to).length;
+  return `<details><summary class="tapall">All departures today</summary>
+    <div class="alltimes"><span class="lbl">${KIND_LABEL[kind]} &middot; ${svc.length} services &middot; departure times`
+    + (nShort?` &middot; <b>small = short-turn (${nShort})</b>`:'') + `</span>${cells}</div></details>`;
+}
+
+function renderBanner(valid){
+  const demo=isDemoData(DATA);
+  document.body.classList.toggle('demo',demo);
+  document.title=(demo?'[DEMO] ':'')+(CFG.title||'Departures');
+  const fb=document.getElementById('demobar');
+  let html='';
+  if(demo) html+='<div class="demobar">DEMO DATA — fictional stops and times.'
+    +'<small>Do not use these times to travel. The board treats data as real only when it is '
+    +'explicitly marked <code>is_demo: false</code>. See README.</small></div>';
+  if(!valid.ok) html+='<div class="demobar err">The loaded data cannot be used.'
+    +'<small>'+valid.errors.slice(0,5).map(esc).join('<br>')+'</small></div>';
+  if(loadError) html+='<div class="demobar err">Loading your data failed.<small>'+esc(loadError)+'</small></div>';
+  fb.innerHTML=html;
+}
+
+function renderBoard(now){
+  const board=document.getElementById('board');
+  const openKeys=new Set([...document.querySelectorAll('.lane details[open]')].map(e=>e.closest('.lane').dataset.key));
+  board.innerHTML=DATA.stops.map(stop=>(stop.lanes||[]).map(l=>laneHTML(l,stop,now)).join('')).join('');
+  document.querySelectorAll('.lane').forEach(el=>{
+    if(openKeys.has(el.dataset.key)){const dt=el.querySelector('details'); if(dt) dt.open=true;}
+  });
+}
+
+function renderStamp(now,valid){
+  const el=document.getElementById('stamp');
+  const lines=[];
+  if(DATA.kind==='static') lines.push({level:'',msg:`Scheduled timetable (static) · generated ${esc(DATA.generated||'unknown')} · valid until ${esc(DATA.valid_until)}`});
+  else lines.push({level:'',msg:`Live estimates · fetched ${esc(DATA.fetched_at)}`});
+  for(const s of dataStatus(DATA,now)) lines.push({level:s.level,msg:esc(s.msg)});
+  for(const w of valid.warnings) lines.push({level:'warn',msg:esc(w)});
+  el.innerHTML=lines.map(l=>`<div class="${l.level}">${l.msg}</div>`).join('');
+}
+
+function renderStatic(){
+  const tz=dataTimeZone(DATA);
+  document.getElementById('dataInfo').innerHTML='<b>Data</b><br>'
+    +`&middot; Source: ${esc(DATA.source||'not stated')}<br>`
+    +`&middot; Kind: ${DATA.kind==='realtime'?'live estimates (realtime)':'scheduled timetable (static)'}<br>`
+    +`&middot; Time zone: ${esc(tz)}${DATA.timezone?'':' (device; not set in data)'}<br>`
+    +`&middot; Marked as demo: ${isDemoData(DATA)?'yes':'no'}`;
+  const attrib=Array.isArray(DATA.attribution)?DATA.attribution:[];
+  document.getElementById('attrib').innerHTML='<b>Attribution</b><br>'
+    +(attrib.length?attrib.map(a=>'&middot; '+esc(a)).join('<br>'):'&middot; None stated by the data.');
+  const links=(Array.isArray(DATA.links)?DATA.links:[]).map(l=>({label:l&&l.label,url:safeUrl(l&&l.url)})).filter(l=>l.url);
+  document.getElementById('links').innerHTML=links.length
+    ? '<div class="lbl2" style="margin:18px 0 8px">Official timetables</div>'
+      + links.map(l=>`<a class="extlink" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">`
+        +`<span><span class="el-t">${esc(l.label||l.url)}</span></span><span class="el-a">&#8599;</span></a>`).join('')
+    : '';
+  document.getElementById('walks').innerHTML=DATA.stops.map((s,i)=>`<div class="walkrow"><label>${esc(s.label)}<small>${esc(s.sub||'')}</small></label>
+      <input type="number" min="0" max="90" value="${walkOf(s)}" data-i="${i}"><span style="color:var(--faint);font-size:13px">min</span></div>`).join('');
+  document.querySelectorAll('#walks input').forEach(inp=>{
+    inp.addEventListener('change',()=>setWalk(DATA.stops[+inp.dataset.i].id,inp.value));
+  });
+}
+
+function renderSpecial(now){
+  const z=zonedParts(now,dataTimeZone(DATA)), out=[];
+  const hol=(DATA.calendar&&DATA.calendar.holidays)||{};
+  if(Object.prototype.hasOwnProperty.call(hol,z.ymd))
+    out.push(`<div class="pitem"><span class="k off">Holiday</span><span class="v">${esc(hol[z.ymd])}</span></div>`);
+  if(!out.length) out.push('<div class="pitem"><span class="k">Normal</span><span class="v">Nothing special today</span></div>');
+  document.getElementById('special').innerHTML=out.join('');
+}
+
+function tick(){
+  const usable=validateData(DATA).ok;
+  const now=new Date(), tz=usable?dataTimeZone(DATA):deviceTimeZone(), z=zonedParts(now,tz);
+  document.getElementById('clock').textContent=`${pad2(z.hh)}:${pad2(z.mm)}`;
+  document.getElementById('dateBig').textContent=
+    now.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',timeZone:tz});
+  document.getElementById('dateSub').textContent=usable?SERVICE_WORD[serviceKind(z.ymd,DATA.calendar)]:'';
+}
+
+function renderAll(){
+  const now=new Date(), valid=validateData(DATA);
+  renderBanner(valid);
+  if(!valid.ok){
+    document.getElementById('board').innerHTML='<div class="errlist">No departures can be shown until the data is fixed.</div>';
+    document.getElementById('stamp').innerHTML='';
+    document.getElementById('special').innerHTML='';
+    return;
+  }
+  renderBoard(now); renderSpecial(now); renderStamp(now,valid);
+}
+
+let loadInFlight=false;
+async function refreshData(){
+  // One request at a time: a slow source is waited for, never cut off or overtaken by the next tick.
+  if(typeof CFG.loadData!=='function'||loadInFlight) return;
+  loadInFlight=true;
+  let fresh=null, err=null;
+  try{
+    fresh=await CFG.loadData();
+    if(!fresh||typeof fresh!=='object') throw new Error('loadData() returned no data.');
+  }catch(e){ err=String(e&&e.message||e); }
+  finally{ loadInFlight=false; }
+  if(err) loadError=err;             // keep showing the previous data, with an error banner
+  else { DATA=fresh; loadError=null; }
+  if(DATA&&validateData(DATA).ok) renderStatic();
+  renderAll();
+}
+
+/* ===== boot ===== */
+if(DATA&&validateData(DATA).ok) renderStatic();
+tick(); renderAll(); refreshData();
+setInterval(tick,1000);
+setInterval(renderAll,10000);
+if(typeof CFG.loadData==='function') setInterval(refreshData,Math.max(15,Number(CFG.refresh_sec)||60)*1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){tick();renderAll();}});
+</script></body></html>

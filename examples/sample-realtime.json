@@ -1,0 +1,15 @@
+{
+  "fetched_at": "2026-10-21T08:00:00+09:00",
+  "stops": [
+    {
+      "id": "pine-gate",
+      "name": "Pine Gate (fictional)",
+      "walk_min": 4,
+      "arrivals": [
+        { "route": "Route 3 (fictional)", "destination": "Willow Yard", "expected": "2026-10-21T08:07:00+09:00" },
+        { "route": "Route 3 (fictional)", "destination": "Willow Yard", "expected": "2026-10-21T08:19:00+09:00", "short_to": "Mill Corner" },
+        { "route": "Route 9 (fictional)", "destination": "Fern Hill", "expected": "2026-10-21T08:03:00+09:00" }
+      ]
+    }
+  ]
+}

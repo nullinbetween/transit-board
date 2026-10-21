@@ -1,0 +1,4 @@
+# Your own settings and data stay local.
+config.local.js
+*.local.js
+.DS_Store

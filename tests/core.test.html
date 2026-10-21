@@ -1,0 +1,321 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>transit-board core tests</title>
+<style>body{font:13px/1.5 ui-monospace,Menlo,monospace;padding:16px}.p{color:#1d7a37}.f{color:#b3261e;font-weight:700}</style>
+</head><body>
+<h1>transit-board — core logic tests</h1>
+<p>Serve the project folder over HTTP (e.g. <code>python3 -m http.server 8765 --bind 127.0.0.1</code>)
+and open <code>/tests/core.test.html</code>. Uses only fictional fixtures; makes no network request
+outside this folder.</p>
+<pre id="out">running…</pre>
+<script src="../demo-data.js"></script>
+<script src="../adapters/simple-csv-adapter.js"></script>
+<script src="../adapters/realtime-json-adapter.js"></script>
+<script>
+(async function () {
+  const out = document.getElementById('out');
+  const results = [];
+  // Load the board's pure core logic straight from the shipped HTML.
+  const html = await (await fetch('../transit-board.html', { cache: 'no-store' })).text();
+  const core = /<script id="core-logic">([\s\S]*?)<\/script>/.exec(html);
+  if (!core) { out.textContent = 'FAIL: core-logic block not found'; document.title = 'FAIL'; return; }
+  const s = document.createElement('script'); s.textContent = core[1]; document.head.appendChild(s);
+
+  function eq(a, b, msg) { if (a !== b) throw new Error((msg ? msg + ': ' : '') + 'expected ' + JSON.stringify(b) + ', got ' + JSON.stringify(a)); }
+  function ok(v, msg) { if (!v) throw new Error(msg || 'expected truthy'); }
+  async function test(name, fn) {
+    try { await fn(); results.push({ name, pass: true }); }
+    catch (e) { results.push({ name, pass: false, err: String(e && e.message || e) }); }
+  }
+  const at = iso => new Date(iso);
+  const DEMO = window.TRANSIT_DATA;
+  const mine = (extra) => Object.assign({
+    format: 'transit-board/v1', dataset_id: 'fixture', is_demo: false, kind: 'static',
+    timezone: 'Asia/Tokyo', valid_until: '2099-12-31', service_day_end_hour: 4,
+    calendar: { holidays: {}, holidays_until: '2099-12-31' },
+    stops: [{ id: 's', label: 'Fixture Stop', walk_min: 5, lanes: [{ id: 'l', line: 'L', to: 'X',
+      services: { wd: [{ t: '06:00' }, { t: '23:50' }, { t: '00:20' }],
+                  sa: [{ t: '07:00' }, { t: '00:15' }],
+                  su: [{ t: '08:00' }] } }] }]
+  }, extra || {});
+  const lane = d => d.stops[0].lanes[0];
+
+  // ---- demo marking ----
+  await test('bundled demo data is valid', () => { const v = validateData(DEMO); ok(v.ok, v.errors.join('; ')); });
+  await test('bundled demo data is treated as demo', () => eq(isDemoData(DEMO), true));
+  await test('editing is_demo:false on the bundled dataset keeps it demo', () => eq(isDemoData({ ...DEMO, is_demo: false }), true));
+  await test('data without is_demo is treated as demo', () => { const x = mine(); delete x.is_demo; eq(isDemoData(x), true); });
+  await test('is_demo:"false" (string) is still demo', () => eq(isDemoData(mine({ is_demo: 'false' })), true));
+  await test('only explicit is_demo:false on own dataset counts as real', () => eq(isDemoData(mine()), false));
+  await test('no data at all is demo and invalid', () => { eq(isDemoData(null), true); eq(validateData(null).ok, false); });
+  await test('demo data carries no coordinates', () => ok(!/"(lat|lon|lng|latitude|longitude|coord)/i.test(JSON.stringify(DEMO))));
+
+  // ---- time zone / calendar ----
+  await test('zonedParts Asia/Tokyo crosses date', () => { const z = zonedParts(at('2026-10-21T15:30:00Z'), 'Asia/Tokyo'); eq(z.ymd, '2026-10-22'); eq(z.hh, 0); eq(z.mm, 30); eq(z.dow, 4); });
+  await test('zonedParts America/New_York', () => { const z = zonedParts(at('2026-10-21T15:30:00Z'), 'America/New_York'); eq(z.ymd, '2026-10-21'); eq(z.hh, 11); });
+  await test('serviceKind weekday / Saturday / Sunday', () => { eq(serviceKind('2026-10-21', {}), 'wd'); eq(serviceKind('2026-10-24', {}), 'sa'); eq(serviceKind('2026-10-25', {}), 'su'); });
+  await test('serviceKind holiday uses holiday_service', () => { eq(serviceKind('2026-10-21', { holidays: { '2026-10-21': 'H' } }), 'su'); eq(serviceKind('2026-10-21', { holidays: { '2026-10-21': 'H' }, holiday_service: 'sa' }), 'sa'); });
+  await test('svcMinutes after-midnight forms', () => { eq(svcMinutes('00:15', 4), 1455); eq(svcMinutes('24:15', 4), 1455); eq(svcMinutes('05:00', 4), 300); eq(svcMinutes('48:00', 4), null); eq(svcMinutes('7:00', 4), null); });
+
+  // ---- departures / walk time ----
+  await test('walk time is subtracted (Wed 05:50, walk 5 → leave in 5 for 06:00)', () => {
+    const r = upcoming(lane(mine()), mine(), at('2026-10-21T05:50:00+09:00'), 5);
+    eq(r.list[0].t, '06:00'); eq(r.list[0].leaveIn, 5); eq(r.list[0].day, 0);
+  });
+  await test('Saturday-night run after midnight is found on Sunday 00:05', () => {
+    const r = upcoming(lane(mine()), mine(), at('2026-10-25T00:05:00+09:00'), 5);
+    eq(r.list[0].t, '00:15'); eq(r.list[0].leaveIn, 5);
+  });
+  await test('Friday-night run after midnight is found on Saturday 00:10', () => {
+    const r = upcoming(lane(mine()), mine(), at('2026-10-24T00:10:00+09:00'), 5);
+    eq(r.list[0].t, '00:20'); eq(r.list[0].leaveIn, 5);
+  });
+  await test('never "no more today": Sunday 22:00 → Monday 06:00 marked tomorrow', () => {
+    const r = upcoming(lane(mine()), mine(), at('2026-10-25T22:00:00+09:00'), 5);
+    eq(r.list[0].t, '06:00'); eq(r.list[0].day, 1); eq(r.list[0].leaveIn, 475);
+  });
+  await test('holiday switches a weekday to the Sunday column', () => {
+    const d = mine({ calendar: { holidays: { '2026-10-21': 'Fixture holiday' }, holidays_until: '2099-12-31' } });
+    const r = upcoming(lane(d), d, at('2026-10-21T07:00:00+09:00'), 5);
+    eq(r.list[0].t, '08:00');
+  });
+  await test('data time zone drives the answer, not the device', () => {
+    const inst = at('2026-10-20T20:50:00Z');
+    eq(upcoming(lane(mine()), mine(), inst, 5).list[0].t, '06:00');
+    const ldn = mine({ timezone: 'Europe/London' });
+    const r = upcoming(lane(ldn), ldn, inst, 5);
+    eq(r.list[0].t, '23:50'); eq(r.list[0].leaveIn, 115);
+  });
+  await test('lane with no services yields no departures', () => {
+    const d = mine(); d.stops[0].lanes[0].services = {};
+    eq(upcoming(lane(d), d, at('2026-10-21T07:00:00+09:00'), 5).list.length, 0);
+  });
+
+  // ---- searching past weekends and holidays ----
+  const wdOnly = (extra) => mine(Object.assign({ stops: [{ id: 's', label: 'Weekday Stop', walk_min: 5, lanes: [{ id: 'l', line: 'L', to: 'X',
+    services: { wd: [{ t: '06:00' }, { t: '07:00' }] } }] }] }, extra || {}));
+  await test('weekday-only route on a Saturday → Monday 06:00, labelled "Mon"', () => {
+    const d = wdOnly();
+    const r = upcoming(lane(d), d, at('2026-10-24T10:00:00+09:00'), 5);
+    eq(r.list[0].t, '06:00'); eq(r.list[0].day, 2); eq(dayLabel(r.today, r.list[0].day), 'Mon');
+  });
+  await test('a run of holidays is searched past (Sat → Thu after a Mon–Wed holiday stretch)', () => {
+    const d = wdOnly({ calendar: { holidays: { '2026-10-26': 'H', '2026-10-27': 'H', '2026-10-28': 'H' }, holidays_until: '2099-12-31' } });
+    const r = upcoming(lane(d), d, at('2026-10-24T10:00:00+09:00'), 5);
+    eq(r.list[0].day, 5); eq(dayLabel(r.today, 5), 'Thu');
+  });
+  await test('runs on days past holidays_until are flagged; days the list covers are not', () => {
+    const d = wdOnly({ calendar: { holidays: {}, holidays_until: '2026-10-25' } });   // list ends on the Sunday
+    const r = upcoming(lane(d), d, at('2026-10-24T10:00:00+09:00'), 5);              // Saturday → Monday's run
+    eq(r.list[0].day, 2); eq(r.list[0].holiday_unchecked, true, 'Monday is not covered');
+    const d2 = wdOnly({ calendar: { holidays: {}, holidays_until: '2026-10-26' } });  // list reaches the Monday
+    eq(upcoming(lane(d2), d2, at('2026-10-24T10:00:00+09:00'), 5).list[0].holiday_unchecked, false);
+    const d3 = wdOnly({ calendar: {} });                                               // no list: the banner says so instead
+    eq(upcoming(lane(d3), d3, at('2026-10-24T10:00:00+09:00'), 5).list[0].holiday_unchecked, false);
+  });
+  await test('no departures are taken from days after valid_until', () => {
+    const d = wdOnly({ valid_until: '2026-10-24' });                  // ends on the Saturday
+    eq(upcoming(lane(d), d, at('2026-10-24T10:00:00+09:00'), 5).list.length, 0, 'Monday is outside the timetable');
+    const d2 = wdOnly({ valid_until: '2026-10-26' });                 // ends on the Monday: Monday still counts
+    eq(upcoming(lane(d2), d2, at('2026-10-24T10:00:00+09:00'), 5).list[0].day, 2);
+  });
+  await test('an expired timetable shows no departures', () => {
+    const d = mine({ valid_until: '2026-10-01' });
+    eq(upcoming(lane(d), d, at('2026-10-21T05:50:00+09:00'), 5).list.length, 0);
+  });
+  await test('dayLabel: today is unlabelled, next day is "tomorrow"', () => { eq(dayLabel('2026-10-21', 0), ''); eq(dayLabel('2026-10-21', 1), 'tomorrow'); eq(dayLabel('2026-10-21', 2), 'Fri'); });
+
+  // ---- freshness ----
+  await test('expired valid_until is flagged stale', () => {
+    const st = dataStatus(mine({ valid_until: '2026-10-01' }), at('2026-10-21T12:00:00+09:00'));
+    ok(st.some(s => s.level === 'stale' && /expired/.test(s.msg)), JSON.stringify(st));
+  });
+  await test('holiday list past its end is flagged stale', () => {
+    const st = dataStatus(mine({ calendar: { holidays: {}, holidays_until: '2026-10-01' } }), at('2026-10-21T12:00:00+09:00'));
+    ok(st.some(s => s.level === 'stale' && /Holiday list/.test(s.msg)), JSON.stringify(st));
+  });
+  await test('missing holiday list is a warning', () => {
+    const st = dataStatus(mine({ calendar: {} }), at('2026-10-21T12:00:00+09:00'));
+    ok(st.some(s => s.level === 'warn'), JSON.stringify(st));
+  });
+
+  // ---- realtime ----
+  const rt = (extra) => Object.assign({
+    format: 'transit-board/v1', dataset_id: 'rt', is_demo: false, kind: 'realtime', timezone: 'Asia/Tokyo',
+    fetched_at: '2026-10-21T08:00:00+09:00', max_age_sec: 120,
+    stops: [{ id: 's', label: 'S', walk_min: 4, lanes: [{ id: 'l', line: 'L', to: 'X',
+      predictions: [{ at: '2026-10-21T08:19:00+09:00' }, { at: '2026-10-21T08:03:00+09:00' }, { at: '2026-10-21T08:07:00+09:00' }] }] }]
+  }, extra || {});
+  await test('realtime data is valid', () => { const v = validateData(rt()); ok(v.ok, v.errors.join('; ')); });
+  await test('realtime: unreachable predictions dropped, sorted, walk applied', () => {
+    const r = upcoming(lane(rt()), rt(), at('2026-10-21T08:01:00+09:00'), 4);
+    eq(r.list.length, 2); eq(r.list[0].t, '08:07'); eq(r.list[0].leaveIn, 2);
+  });
+  await test('realtime: older than max_age_sec is stale', () => {
+    ok(dataStatus(rt(), at('2026-10-21T08:05:00+09:00')).some(s => s.level === 'stale'));
+    eq(dataStatus(rt(), at('2026-10-21T08:01:00+09:00')).length, 0);
+  });
+  await test('realtime: time without UTC offset is rejected', () => {
+    const d = rt(); d.stops[0].lanes[0].predictions = [{ at: '2026-10-21T08:07:00' }];
+    eq(validateData(d).ok, false);
+  });
+
+  // ---- real dates and timestamps (shape alone is not enough) ----
+  await test('isRealYmd: leap days and impossible dates', () => {
+    eq(isRealYmd('2028-02-29'), true); eq(isRealYmd('2000-02-29'), true);
+    for (const bad of ['2027-02-29', '1900-02-29', '2026-02-30', '2026-04-31', '2026-13-01', '2027-99-99', '2026-00-10', '2026-10-00', '', null, '20261021'])
+      eq(isRealYmd(bad), false, String(bad));
+  });
+  await test('isValidIsoWithOffset: real date, time and UTC offset only', () => {
+    for (const good of ['2026-10-21T08:00:00+09:00', '2026-10-21T08:00Z', '2028-02-29T23:59:59.5-05:30'])
+      eq(isValidIsoWithOffset(good), true, good);
+    for (const bad of ['2026-99-99T00:00:00Z', '2026-02-30T08:00:00Z', '2027-02-29T08:00:00Z', '2026-10-21T24:00:00Z',
+                       '2026-10-21T08:60:00Z', '2026-10-21T08:00:61Z', '2026-10-21T08:00:00+25:00', '2026-10-21T08:00:00+09:60',
+                       '2026-10-21T08:00:00', '2026-10-21 08:00:00Z'])
+      eq(isValidIsoWithOffset(bad), false, bad);
+  });
+  await test('static: leap-day valid_until is accepted', () => { const v = validateData(mine({ valid_until: '2028-02-29' })); ok(v.ok, v.errors.join('; ')); });
+  await test('static: impossible valid_until is rejected (2027-99-99, 2027-02-29, 2026-02-30)', () => {
+    for (const bad of ['2027-99-99', '2027-02-29', '2026-02-30']) eq(validateData(mine({ valid_until: bad })).ok, false, bad);
+  });
+  await test('static: impossible calendar.holidays_until is rejected; a missing one is still allowed', () => {
+    eq(validateData(mine({ calendar: { holidays: {}, holidays_until: '2026-13-01' } })).ok, false);
+    const v = validateData(mine({ calendar: { holidays: {} } })); ok(v.ok, v.errors.join('; '));
+  });
+  await test('realtime: impossible fetched_at is rejected (bad date, bad offset)', () => {
+    eq(validateData(rt({ fetched_at: '2026-99-99T00:00:00Z' })).ok, false);
+    eq(validateData(rt({ fetched_at: '2026-10-21T08:00:00+25:00' })).ok, false);
+  });
+  await test('realtime: impossible prediction time is rejected', () => {
+    const d = rt(); d.stops[0].lanes[0].predictions = [{ at: '2026-02-30T08:07:00+09:00' }];
+    eq(validateData(d).ok, false);
+  });
+  await test('UI: invalid data shows no departures; demo and real marking unchanged', async () => {
+    const f = document.createElement('iframe');
+    f.style.cssText = 'width:420px;height:600px;border:1px solid #ccc';
+    document.body.appendChild(f);
+    await new Promise(r => { f.onload = r; f.src = '../transit-board.html'; });
+    const w = f.contentWindow, d = w.document;
+    ok(d.body.classList.contains('demo') && d.title.startsWith('[DEMO]'), 'bundled demo must be marked demo');
+    ok(d.querySelectorAll('#board .lane').length > 0, 'demo shows lanes');
+    w.eval('DATA = ' + JSON.stringify(rt({ is_demo: false, fetched_at: '2026-99-99T00:00:00Z' })) + '; renderAll();');
+    eq(d.querySelectorAll('#board .lane').length, 0, 'invalid data must show no departures');
+    ok(d.getElementById('demobar').textContent.includes('cannot be used'), 'error banner shown');
+    w.eval('DATA = ' + JSON.stringify(mine()) + '; renderStatic(); renderAll();');
+    ok(!d.body.classList.contains('demo'), 'explicit is_demo:false data is not marked demo');
+    eq(d.querySelectorAll('#board .lane').length, 1);
+  });
+
+  await test('UI: a departure past holidays_until says the holiday list ends', async () => {
+    const f = document.createElement('iframe');
+    f.style.cssText = 'width:420px;height:300px;border:1px solid #ccc';
+    document.body.appendChild(f);
+    await new Promise(r => { f.onload = r; f.src = '../transit-board.html'; });
+    const w = f.contentWindow;
+    const html = (cal, iso) => w.eval('DATA = ' + JSON.stringify(wdOnly({ calendar: cal })) + '; laneHTML(DATA.stops[0].lanes[0], DATA.stops[0], new Date("' + iso + '"))');
+    ok(html({ holidays: {}, holidays_until: '2026-10-25' }, '2026-10-24T10:00:00+09:00').includes('holiday list ends 2026-10-25'), 'Saturday → Monday run must be flagged');
+    ok(!html({ holidays: {}, holidays_until: '2026-10-26' }, '2026-10-24T10:00:00+09:00').includes('holiday list ends'), 'covered day must not be flagged');
+    ok(!html({ holidays: {}, holidays_until: '2026-10-23' }, '2026-10-24T10:00:00+09:00').includes('class="hutag"'), 'once the list has run out today the banner says it, not every lane');
+  });
+
+  await test('UI: one loadData() at a time — a slow answer is still applied; empty answers keep the data', async () => {
+    const html = await (await fetch('../transit-board.html', { cache: 'no-store' })).text();
+    const inject = '<base href="../"><script>window.__resolvers = []; window.TRANSIT_CONFIG = { refresh_sec: 3600, loadData: () => new Promise(r => window.__resolvers.push(r)) };<\/script>';
+    const f = document.createElement('iframe');
+    f.style.cssText = 'width:420px;height:300px;border:1px solid #ccc';
+    document.body.appendChild(f);
+    await new Promise(r => { f.onload = r; f.srcdoc = html.replace('<head>', '<head>' + inject); });
+    const w = f.contentWindow, d = w.document;
+    const wait = async (cond) => { for (let i = 0; i < 100 && !cond(); i++) await new Promise(r => setTimeout(r, 20)); ok(cond(), 'timeout'); };
+    const pause = ms => new Promise(r => setTimeout(r, ms));
+    const named = (id, label) => { const x = JSON.parse(JSON.stringify(mine({ dataset_id: id }))); x.stops[0].label = label; return w.JSON.parse(JSON.stringify(x)); };
+    await wait(() => w.__resolvers.length === 1);                 // the request made at start-up
+    w.refreshData(); w.refreshData();                              // ticks while it is still pending (slow network)
+    await pause(60);
+    eq(w.__resolvers.length, 1, 'no overlapping request may be started');
+    w.__resolvers[0](named('slow', 'Slow Stop'));                  // the slow answer finally arrives
+    await pause(60);
+    eq(w.eval('DATA.dataset_id'), 'slow', 'a slow answer must still be applied');
+    ok(d.getElementById('board').textContent.includes('Slow Stop'));
+    w.refreshData();
+    await wait(() => w.__resolvers.length === 2);
+    w.__resolvers[1](named('next', 'Next Stop'));
+    await pause(60);
+    eq(w.eval('DATA.dataset_id'), 'next');
+    w.refreshData();
+    await wait(() => w.__resolvers.length === 3);
+    w.__resolvers[2](undefined);                                  // a broken loader
+    await pause(60);
+    eq(w.eval('DATA.dataset_id'), 'next', 'previous data kept');
+    ok(d.getElementById('demobar').textContent.includes('returned no data'), 'error banner shown');
+  });
+
+  // ---- validation / safety ----
+  await test('bad HH:MM is rejected', () => { const d = mine(); d.stops[0].lanes[0].services.wd = [{ t: '6:00' }]; eq(validateData(d).ok, false); });
+  await test('walk_min out of range is rejected', () => { const d = mine(); d.stops[0].walk_min = 500; eq(validateData(d).ok, false); });
+  await test('static data without valid_until is rejected', () => { const d = mine(); delete d.valid_until; eq(validateData(d).ok, false); });
+  await test('wrong JSON types are rejected with a clear message', () => {
+    const cases = [
+      ['label is a number', d => { d.stops[0].label = 7; }],
+      ['line is an object', d => { d.stops[0].lanes[0].line = { name: 'L' }; }],
+      ['services is an array', d => { d.stops[0].lanes[0].services = [{ t: '06:00' }]; }],
+      ['t is a number', d => { d.stops[0].lanes[0].services.wd = [{ t: 600 }]; }],
+      ['short_to is a number', d => { d.stops[0].lanes[0].services.wd = [{ t: '06:00', short_to: 3 }]; }],
+      ['calendar is an array', d => { d.calendar = []; }],
+      ['holidays is an array', d => { d.calendar = { holidays: ['2026-12-25'] }; }],
+      ['holiday key is not a date', d => { d.calendar = { holidays: { '2026-02-30': 'X' } }; }],
+      ['holiday name is a number', d => { d.calendar = { holidays: { '2026-12-25': 1 } }; }],
+      ['holiday_service is unknown', d => { d.calendar = { holiday_service: 'mon' }; }],
+      ['attribution is a string', d => { d.attribution = 'me'; }],
+      ['links is an object', d => { d.links = { url: 'https://example.org' }; }],
+      ['generated is not a date', d => { d.generated = '2026-13-01'; }],
+      ['the whole thing is an array', null]
+    ];
+    for (const [name, mutate] of cases) {
+      const d = mutate ? mine() : [];
+      if (mutate) mutate(d);
+      const v = validateData(d);
+      eq(v.ok, false, name); ok(v.errors.length > 0, name);
+    }
+  });
+  await test('is_demo given as a string is a warning (and the data stays demo)', () => {
+    const v = validateData(mine({ is_demo: 'no' })); ok(v.ok); ok(v.warnings.some(w => w.includes('is_demo')));
+  });
+  await test('unknown time zone is rejected', () => eq(validateData(mine({ timezone: 'Mars/Base' })).ok, false));
+  await test('esc() escapes HTML', () => eq(esc('<img src=x onerror="a">&\''), '&lt;img src=x onerror=&quot;a&quot;&gt;&amp;&#39;'));
+  await test('safeUrl() only allows http(s)', () => { eq(safeUrl('javascript:alert(1)'), null); eq(safeUrl('https://example.org/x'), 'https://example.org/x'); });
+
+  // ---- adapters ----
+  await test('CSV adapter: sample converts, stays demo by default', async () => {
+    const csv = await (await fetch('../examples/sample-timetable.csv', { cache: 'no-store' })).text();
+    const d = TransitAdapters.fromSimpleCsv(csv, { timezone: 'Asia/Tokyo', valid_until: '2027-03-31' });
+    const v = validateData(d); ok(v.ok, v.errors.join('; '));
+    eq(isDemoData(d), true);
+    eq(d.stops[0].lanes[0].to, 'Willow Yard, East');
+    eq(d.stops[0].lanes[0].services.wd[1].short_to, 'Mill Corner');
+    eq(d.stops[0].lanes[0].services.wd.length, 4);
+  });
+  await test('CSV adapter: explicit is_demo:false makes it real', async () => {
+    const csv = await (await fetch('../examples/sample-timetable.csv', { cache: 'no-store' })).text();
+    eq(isDemoData(TransitAdapters.fromSimpleCsv(csv, { is_demo: false, dataset_id: 'mine', valid_until: '2027-03-31' })), false);
+  });
+  await test('CSV adapter: bad day_type throws with row number', () => {
+    let msg = '';
+    try { TransitAdapters.fromSimpleCsv('stop_id,stop_label,walk_min,lane_id,line,to,day_type,time\na,A,3,l,L,X,mon,06:00\n'); } catch (e) { msg = e.message; }
+    ok(/Row 2/.test(msg), msg);
+  });
+  await test('Realtime adapter: sample converts and groups lanes', async () => {
+    const j = await (await fetch('../examples/sample-realtime.json', { cache: 'no-store' })).json();
+    const d = TransitAdapters.fromRealtimeJson(j, { timezone: 'Asia/Tokyo' });
+    const v = validateData(d); ok(v.ok, v.errors.join('; '));
+    eq(d.stops[0].lanes.length, 2); eq(isDemoData(d), true);
+  });
+
+  const failed = results.filter(r => !r.pass);
+  out.innerHTML = results.map(r => r.pass ? '<span class="p">PASS</span> ' + r.name
+    : '<span class="f">FAIL</span> ' + r.name + ' — ' + r.err.replace(/</g, '&lt;')).join('\n')
+    + '\n\n' + (results.length - failed.length) + '/' + results.length + ' passed';
+  document.title = (failed.length ? 'FAIL ' : 'PASS ') + (results.length - failed.length) + '/' + results.length;
+  window.__TEST_RESULTS__ = results;
+})();
+</script>
+</body></html>

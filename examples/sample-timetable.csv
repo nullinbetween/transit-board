@@ -1,0 +1,7 @@
+stop_id,stop_label,walk_min,lane_id,line,to,day_type,time,short_to
+pine-gate,Pine Gate (fictional),4,r3-east,Route 3 (fictional),"Willow Yard, East",wd,06:10,
+pine-gate,Pine Gate (fictional),4,r3-east,Route 3 (fictional),"Willow Yard, East",wd,06:40,Mill Corner
+pine-gate,Pine Gate (fictional),4,r3-east,Route 3 (fictional),"Willow Yard, East",wd,23:50,
+pine-gate,Pine Gate (fictional),4,r3-east,Route 3 (fictional),"Willow Yard, East",wd,00:20,
+pine-gate,Pine Gate (fictional),4,r3-east,Route 3 (fictional),"Willow Yard, East",sa,07:00,
+pine-gate,Pine Gate (fictional),4,r3-east,Route 3 (fictional),"Willow Yard, East",su,08:00,
